@@ -1,0 +1,112 @@
+(ns shunting-yard
+  (:require [basilisp.string :as str]))
+
+; TODO: use symbol types for these
+(def comma [","])
+(def parens ["(" ")"])
+(def operators ["+" "*" "-" "/" "^"])
+(def functions ["sin" "cos" "max" "min"])
+(def precedences {"^" 5 "*" 3 "/" 3 "+" 1 "-" 1})
+(def left-assosciative ["+" "*" "-" "/"])
+
+(def program1 "3 + 4")
+(def program2 "3 + 4 * 1")
+(def program3 "3 + 4 * (2 - 1)")
+(def program4 "3 + 4 * 2 / (1 - 5) ^ 2 ^ 3")
+(def program5 "sin(max(2, 3) / 3 * 314)")
+
+(defn in? [xs x]
+  (some? (some #{x} xs)))
+
+(defn cmp [x y]
+  (cond
+    (< x y) '<
+    (= x y) '=
+    (> x y) '>
+    :else (throw (Exception))))
+
+(defn pad-chars [s cs]
+  (letfn [(pad-char [s c]
+            (str/replace s c (str " " c " ")))]
+    (reduce pad-char s cs)))
+
+; TODO: handle pi
+(defn tokenize [s]
+  (remove empty?
+          (-> s
+              (pad-chars (concat comma parens operators functions))
+              (str/split " "))))
+
+
+(defn number? [x] (str/digits? x))
+
+(defn function? [x] (in? functions x))
+
+(defn operator? [x] (in? operators x))
+
+(defn comma? [x] (in? comma x))
+
+(defn lparen? [x] (= x "("))
+(def not-lparen? (complement lparen?))
+
+(defn rparen? [x] (= x ")"))
+
+(defn left-assosciative? [x] (in? left-assosciative x))
+
+(defn precedence [o1 o2]
+  {:pre [(operator? o1)
+         (operator? o2)]}
+  (apply cmp (map precedences [o1 o2])))
+
+
+; TODO: improve error handling for mismatched parentheses
+(defn parse [tokens]
+  (loop [tokens tokens
+         ops (list)
+         acc (vector)]
+    (if (empty? tokens)
+        (into acc
+              (map (fn [token]
+                      (assert (not-lparen? token))
+                      token))
+              ops)
+        (let [t (first tokens)]
+            (cond
+                (number? t) (recur (rest tokens) ops (conj acc t))
+                (function? t) (recur (rest tokens) (conj ops t) acc)
+                (operator? t) (let [[top ops] (doall (split-with (fn [x]
+                                                                   (and (operator? x)
+                                                                        (not-lparen? x)
+                                                                        (let [p (precedence x t)]
+                                                                          (or (= p '>)
+                                                                              (and (= p '=)
+                                                                                   (left-assosciative? t))))))
+                                                                ops))]
+                               (recur (rest tokens) (doall (conj ops t)) (doall (into acc top))))
+                (comma? t) (let [[top ops] (doall (split-with not-lparen? ops))]
+                               (recur (rest tokens) ops (doall (into acc top))))
+                (lparen? t) (recur (rest tokens) (doall (conj ops t)) acc)
+                (rparen? t) (let [[top ops] (doall (split-with not-lparen? ops))]
+                              (assert (lparen? (first ops)))
+                              (let [ops (doall (rest ops))
+                                    acc (doall (into acc top))]
+                                (if (and ops (function? (first ops)))
+                                  (recur (doall (rest tokens)) (doall (rest ops)) (conj acc (first ops)))
+                                  (recur (rest tokens) ops acc))))
+                :else (throw (SyntaxError)))))))
+
+(map #(-> % tokenize parse)
+     [program1 program2 program3 program4 program5])
+
+
+(defn -main [& args]
+  (println "Enter an infix expression to parse:")
+  (loop []
+    (let [program (do
+                    (print "> ")
+                    (flush)
+                    (read-line))]
+     (println (str/join " " (-> program tokenize parse)))
+     (recur))))
+
+(-main)
